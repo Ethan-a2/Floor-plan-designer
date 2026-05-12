@@ -385,7 +385,6 @@ const app = {
             w, h,
             rot: 0,
             opacity: defaultOpacity,
-            locked: false,
             visible: true,
             name: fileName ? fileName.replace(/\.[^.]+$/, '') : (placement === 'back' ? '底图' : '组件')
         };
@@ -1162,7 +1161,6 @@ const app = {
     },
     deleteSelected() {
         if (!this.selected) return;
-        if (this.selected.locked) { alert('对象已锁定，无法删除'); return; }
         this.objects = this.objects.filter(o=>o!==this.selected);
         this.select(null);
         this.render();
@@ -1170,7 +1168,6 @@ const app = {
     },
     duplicate() {
         if (!this.selected) return;
-        if (this.selected.locked) { alert('对象已锁定，解锁后才能复制'); return; }
         const nc = JSON.parse(JSON.stringify(this.selected));
         nc.id = this.nextId++;
         if ('x' in nc) nc.x += GRID*2;
@@ -1184,7 +1181,6 @@ const app = {
     rotateSelected() {
         const o = this.selected;
         if (!o) return;
-        if (o.locked) { alert('对象已锁定'); return; }
         if ('rot' in o) { o.rot = (o.rot + 90) % 360; }
         else if (o.type === 'wall' || o.type==='door' || o.type==='window') {
             // 以中点为轴旋转
@@ -1204,10 +1200,10 @@ const app = {
 
     /* ========== 命中测试 ========== */
     hitTest(p) {
-        // 从后往前（上层优先）, 跳过锁定和隐藏对象
+        // 从后往前（上层优先）, 跳过隐藏对象
         for (let i = this.objects.length - 1; i >= 0; i--) {
             const o = this.objects[i];
-            if (o.locked || o.visible === false) continue;
+            if (o.visible === false) continue;
             if (this.ptInObj(p, o)) return o;
         }
         return null;
@@ -1789,16 +1785,14 @@ const app = {
         const o = this.selected;
 
         if (!o) {
-            // 未选中：显示快速上手 + 图层概览
             const imageCount = this.objects.filter(x => x.type === 'image' || x.type === 'svg').length;
             let imageHint = '';
             if (imageCount > 0) {
                 imageHint = `<div style="margin-top:16px;padding:10px;background:#fef3c7;border-radius:4px;font-size:12px;color:#92400e;">
-                    🖼 当前楼层有 ${imageCount} 个图像组件<br>
-                    点击即可选中编辑（已锁定的需要通过其他对象的图层列表或保存 JSON 后手工修改解锁）
+                    🖼 当前楼层有 ${imageCount} 个图像组件，点击即可编辑
                   </div>`;
             }
-            p.innerHTML = '<h3>属性</h3><div class="empty-hint">未选中对象<br><br>📌 快速上手<br>• 左侧工具：房间/L型/T型 一键画<br>• 图形库：拖拽到画布<br>• 🖼 底图：置底半透明，适合描图<br>• 📎 图片 / 🎨 SVG：作为组件插入<br>• 选中任何对象都支持锁定/可见/图层<br>• 滚轮缩放 · 中键/Space 平移<br>• Delete删除 · Ctrl+D复制 · R旋转</div>' + imageHint;
+            p.innerHTML = '<h3>属性</h3><div class="empty-hint">未选中对象<br><br>📌 快速上手<br>• 左侧工具：房间/L型/T型 一键画<br>• 图形库：拖拽到画布<br>• 🖼 底图：置底半透明，适合描图<br>• 📎 图片 / 🎨 SVG：作为组件插入<br>• 每个对象可独立显示/隐藏、调整图层<br>• 滚轮缩放 · 中键/Space 平移<br>• Delete删除 · Ctrl+D复制 · R旋转</div>' + imageHint;
             this.tip.style.display='none';
             return;
         }
@@ -1808,9 +1802,8 @@ const app = {
 
         let html = `<h3>${typeLabel(o.type)}${o.name?' · '+escapeXml(o.name):''}</h3>`;
 
-        // —— 通用: 可见 / 锁定 (所有对象都有) ——
+        // —— 通用: 可见 (所有对象都有) ——
         html += row('可见', `<input type="checkbox" ${o.visible !== false ? 'checked' : ''} onchange="app.setProp('visible', this.checked)">`);
-        html += row('锁定', `<input type="checkbox" ${o.locked ? 'checked' : ''} onchange="app.setProp('locked', this.checked); if(this.checked) app.select(null);" title="锁定后不能再被选中/移动/缩放">`);
 
         // —— 类型专属字段 ——
         if (o.type === 'image' || o.type === 'svg') {
@@ -1981,7 +1974,6 @@ const app = {
                     x: bg.x, y: bg.y, w: bg.w, h: bg.h,
                     rot: bg.rot || 0,
                     opacity: bg.opacity != null ? bg.opacity : 0.5,
-                    locked: bg.locked === true,
                     visible: bg.visible !== false,
                     name: '底图'
                 };
