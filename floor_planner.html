@@ -118,6 +118,7 @@ body { font-family: "Microsoft YaHei","PingFang SC","Segoe UI",sans-serif; heigh
     <button onclick="app.toggleDimensions()" id="btnDim" title="自动在外墙四周生成尺寸链">📏 尺寸标注</button>
     <div class="sep"></div>
     <button onclick="app.importBackground()" title="导入扫描户型图作为底图(描图)">🖼 底图</button>
+    <button onclick="app.toggleBgVisible()" id="btnBgVis" title="快速显示/隐藏底图">👁 显/隐</button>
     <button onclick="app.calibrateBackground()" id="btnCalib" title="两点标定：按已知距离缩放底图到真实尺寸">📐 标定</button>
     <div class="grow"></div>
     <button onclick="app.newProject()">🆕 新建</button>
@@ -312,6 +313,208 @@ const app = {
         const cur = this.floors[this.currentFloor];
         const nv = prompt('楼层名称:', cur.name);
         if (nv) { cur.name = nv; this.renderFloorTabs(); this.pushHistory(); }
+    },
+
+    /* ========== 底图(描图) ========== */
+    // 导入扫描图作为当前楼层底图
+    importBackground() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = e => {
+            const file = e.target.files && e.target.files[0];
+            if (!file) return;
+            // 大文件警告(>3MB)
+            if (file.size > 3 * 1024 * 1024) {
+                if (!confirm(`文件较大 (${(file.size/1024/1024).toFixed(1)}MB)，会压缩为 JPEG 以缩小保存体积。继续?`)) return;
+            }
+            const reader = new FileReader();
+            reader.onload = ev => {
+                const img = new Image();
+                img.onload = () => {
+                    // 如果文件>1MB 或分辨率过大，压缩
+                    let src = ev.target.result;
+                    const maxDim = 2000;
+                    if (file.size > 1024 * 1024 || img.naturalWidth > maxDim || img.naturalHeight > maxDim) {
+                        const scale = Math.min(1, maxDim / Math.max(img.naturalWidth, img.naturalHeight));
+                        const cv = document.createElement('canvas');
+                        cv.width = Math.round(img.naturalWidth * scale);
+                        cv.height = Math.round(img.naturalHeight * scale);
+                        cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+                        src = cv.toDataURL('image/jpeg', 0.8);
+                    }
+                    const floor = this.floors[this.currentFloor];
+                    // 默认按 1px = 1 user-unit 放置，居中在当前视口中心
+                    const vp = this.viewport;
+                    const cx = (this.svg.clientWidth/2 - vp.x) / vp.zoom;
+                    const cy = (this.svg.clientHeight/2 - vp.y) / vp.zoom;
+                    const w = img.naturalWidth, h = img.naturalHeight;
+                    floor.bgImage = {
+                        src,
+                        x: this.snap(cx - w/2), y: this.snap(cy - h/2),
+                        w, h,
+                        rot: 0,
+                        opacity: 0.5,
+                        locked: false,  // 默认不锁定，可拖动/缩放
+                        visible: true
+                    };
+                    // 自动选中底图，方便立即编辑
+                    floor.bgImage.type = 'bgImage';
+                    this.selected = floor.bgImage;
+                    this.render();
+                    this.pushHistory();
+                    this.updatePropsPanel();
+                    // 柔性提示
+                    setTimeout(() => {
+                        this.tip.textContent = '已导入底图：拖动定位 · 四角缩放 · 点 📐 按真实尺寸标定';
+                        this.tip.style.left = '50%';
+                        this.tip.style.top = '80px';
+                        this.tip.style.transform = 'translateX(-50%)';
+                        this.tip.style.display = 'block';
+                        setTimeout(() => {
+                            this.tip.style.display = 'none';
+                            this.tip.style.transform = '';
+                        }, 4000);
+                    }, 50);
+                };
+                img.onerror = () => alert('图片加载失败');
+                img.src = ev.target.result;
+            };
+            reader.readAsDataURL(file);
+        };
+        input.click();
+    },
+
+    // 移除当前楼层底图
+    removeBackground() {
+        const floor = this.floors[this.currentFloor];
+        if (!floor.bgImage) return;
+        if (!confirm('移除当前楼层底图?')) return;
+        delete floor.bgImage;
+        this.render();
+        this.pushHistory();
+        this.updatePropsPanel();
+    },
+
+    // 两点标定：用户点两点 + 输入实际 mm 数 → 缩放底图
+    calibrateBackground() {
+        const floor = this.floors[this.currentFloor];
+        if (!floor.bgImage) { alert('请先点击"🖼 底图"导入扫描图'); return; }
+        // 暂时解锁底图让用户能看清，但不允许拖动
+        alert('请在底图上依次点击两个已知距离的端点\n(例如一面墙的两端)');
+        const prevTool = this.tool;
+        this.setTool('select');
+        this._calibPts = [];
+        this.svg.style.cursor = 'crosshair';
+        document.getElementById('btnCalib').style.background = '#f59e0b';
+        document.getElementById('btnCalib').style.color = '#fff';
+
+        const handler = e => {
+            if (e.button !== 0) return;
+            e.stopPropagation();
+            e.preventDefault();
+            const p = this.clientToWorld(e.clientX, e.clientY);
+            this._calibPts.push(p);
+
+            // 画个临时标记
+            const ns = 'http://www.w3.org/2000/svg';
+            const mark = document.createElementNS(ns, 'circle');
+            mark.setAttribute('cx', p.x); mark.setAttribute('cy', p.y);
+            mark.setAttribute('r', 6 / this.viewport.zoom);
+            mark.setAttribute('fill', '#f59e0b');
+            mark.setAttribute('stroke', '#fff');
+            mark.setAttribute('stroke-width', 2 / this.viewport.zoom);
+            mark.setAttribute('class', 'calib-mark');
+            this.layerOv.appendChild(mark);
+
+            if (this._calibPts.length === 2) {
+                // 连线
+                const [a, b] = this._calibPts;
+                const ln = document.createElementNS(ns, 'line');
+                ln.setAttribute('x1', a.x); ln.setAttribute('y1', a.y);
+                ln.setAttribute('x2', b.x); ln.setAttribute('y2', b.y);
+                ln.setAttribute('stroke', '#f59e0b');
+                ln.setAttribute('stroke-width', 2 / this.viewport.zoom);
+                ln.setAttribute('stroke-dasharray', '4,3');
+                this.layerOv.appendChild(ln);
+
+                // 解绑
+                this.svg.removeEventListener('click', handler, true);
+                this.svg.style.cursor = '';
+                document.getElementById('btnCalib').style.background = '';
+                document.getElementById('btnCalib').style.color = '';
+
+                const pixLen = Math.hypot(b.x - a.x, b.y - a.y);
+                const currentMm = Math.round(pixLen * MM_PER_UNIT);
+                const mmStr = prompt(
+                    `两点的图上距离当前是 ${currentMm} mm\n请输入实际距离 (mm):`,
+                    String(currentMm)
+                );
+                this.render();  // 清除标记
+                if (!mmStr) { this.setTool(prevTool); return; }
+                const mm = +mmStr;
+                if (!mm || mm < 1) { alert('无效数值'); this.setTool(prevTool); return; }
+
+                const targetLen = mm / MM_PER_UNIT;
+                const scale = targetLen / pixLen;
+                const bg = floor.bgImage;
+                // 以第一个点为缩放中心，保持用户标记的点位置不动
+                const ax = a.x, ay = a.y;
+                bg.x = ax + (bg.x - ax) * scale;
+                bg.y = ay + (bg.y - ay) * scale;
+                bg.w *= scale;
+                bg.h *= scale;
+
+                this.render();
+                this.pushHistory();
+                alert(`已按 ${mm}mm 校准 (缩放比例 ${scale.toFixed(4)})`);
+                this.setTool(prevTool);
+            }
+        };
+        // 用 capture 阶段，抢在画布自身的 mousedown 前
+        this.svg.addEventListener('click', handler, true);
+        // Esc 取消
+        const cancel = ke => {
+            if (ke.key === 'Escape') {
+                this.svg.removeEventListener('click', handler, true);
+                this.svg.style.cursor = '';
+                document.getElementById('btnCalib').style.background = '';
+                document.getElementById('btnCalib').style.color = '';
+                document.removeEventListener('keydown', cancel, true);
+                this.render();
+                this.setTool(prevTool);
+            }
+        };
+        document.addEventListener('keydown', cancel, true);
+    },
+
+    // 设置底图属性（保留给外部“未选中状态”的面板用）
+    setBgProp(k, v) {
+        const bg = this.floors[this.currentFloor].bgImage;
+        if (!bg) return;
+        bg[k] = v;
+        this.render();
+    },
+
+    // 快速切换当前楼层底图可见（不存在则提示导入）
+    toggleBgVisible() {
+        const bg = this.floors[this.currentFloor].bgImage;
+        if (!bg) { alert('当前楼层还没有底图，先点"🖼 底图"导入'); return; }
+        bg.visible = !(bg.visible !== false);
+        this.render();
+        if (this.selected === bg) this.updatePropsPanel();
+    },
+
+    // 拖/缩放时的边界命中（只在未锁定时有效）
+    hitBackground(p) {
+        const bg = this.floors[this.currentFloor].bgImage;
+        if (!bg || bg.locked || bg.visible === false) return false;
+        // 考虑旋转
+        const cx = bg.x + bg.w/2, cy = bg.y + bg.h/2;
+        const rad = -(bg.rot || 0) * Math.PI / 180;
+        const lx = Math.cos(rad)*(p.x-cx) - Math.sin(rad)*(p.y-cy) + cx;
+        const ly = Math.sin(rad)*(p.x-cx) + Math.cos(rad)*(p.y-cy) + cy;
+        return lx >= bg.x && lx <= bg.x+bg.w && ly >= bg.y && ly <= bg.y+bg.h;
     },
 
     /* ========== 家具组件库 (按分类) ========== */
@@ -741,10 +944,29 @@ const app = {
                 const o = d.obj, orig = d.orig;
                 const dx = sp.x - this.snap(d.start.x);
                 const dy = sp.y - this.snap(d.start.y);
-                if (d.handle.includes('e')) o.w = Math.max(GRID, orig.w + dx);
-                if (d.handle.includes('s')) o.h = Math.max(GRID, orig.h + dy);
-                if (d.handle.includes('w')) { o.x = orig.x + dx; o.w = Math.max(GRID, orig.w - dx); }
-                if (d.handle.includes('n')) { o.y = orig.y + dy; o.h = Math.max(GRID, orig.h - dy); }
+                // 底图按纵横比缩放（对角手柄），保持扫描图不变形
+                if (o.type === 'bgImage' && !e.shiftKey) {
+                    const aspect = orig.w / orig.h;
+                    // 用对角方向投影决定主缩放量
+                    const signX = d.handle.includes('e') ? 1 : (d.handle.includes('w') ? -1 : 0);
+                    const signY = d.handle.includes('s') ? 1 : (d.handle.includes('n') ? -1 : 0);
+                    // 取 dx/dy 投影的较大者
+                    const proj = Math.abs(dx) > Math.abs(dy*aspect) ? dx*signX : dy*signY*aspect;
+                    const newW = Math.max(GRID, orig.w + proj);
+                    const newH = newW / aspect;
+                    if (signX > 0) o.w = newW;
+                    else if (signX < 0) { o.x = orig.x + (orig.w - newW); o.w = newW; }
+                    if (signY > 0) o.h = newH;
+                    else if (signY < 0) { o.y = orig.y + (orig.h - newH); o.h = newH; }
+                    // 纯边手柄(只 w 或只 h) 时仍按比例
+                    if (signX === 0) { o.w = newW; if (signY !== 0) {/* y 已改 */} else o.x = orig.x + (orig.w-newW)/2; }
+                    if (signY === 0) { o.h = newH; if (signX === 0) o.y = orig.y + (orig.h-newH)/2; }
+                } else {
+                    if (d.handle.includes('e')) o.w = Math.max(GRID, orig.w + dx);
+                    if (d.handle.includes('s')) o.h = Math.max(GRID, orig.h + dy);
+                    if (d.handle.includes('w')) { o.x = orig.x + dx; o.w = Math.max(GRID, orig.w - dx); }
+                    if (d.handle.includes('n')) { o.y = orig.y + dy; o.h = Math.max(GRID, orig.h - dy); }
+                }
                 this.render();
                 this.showDim(o);
                 this.updatePropsPanel();
@@ -899,6 +1121,14 @@ const app = {
     },
     deleteSelected() {
         if (!this.selected) return;
+        // 底图特殊处理：清除当前楼层 bgImage
+        if (this.selected.type === 'bgImage') {
+            delete this.floors[this.currentFloor].bgImage;
+            this.select(null);
+            this.render();
+            this.pushHistory();
+            return;
+        }
         this.objects = this.objects.filter(o=>o!==this.selected);
         this.select(null);
         this.render();
@@ -906,6 +1136,7 @@ const app = {
     },
     duplicate() {
         if (!this.selected) return;
+        if (this.selected.type === 'bgImage') return;  // 底图不支持复制
         const nc = JSON.parse(JSON.stringify(this.selected));
         nc.id = this.nextId++;
         if ('x' in nc) nc.x += GRID*2;
@@ -943,9 +1174,28 @@ const app = {
             const o = this.objects[i];
             if (this.ptInObj(p, o)) return o;
         }
+        // 最底层: 底图 (仅未锁定 + 可见时可被选中)
+        const bg = this.floors[this.currentFloor].bgImage;
+        if (bg && !bg.locked && bg.visible !== false && this.ptInBg(p, bg)) {
+            // 给底图对象打标记，沿用后续代码的类型分发
+            bg.type = 'bgImage';
+            return bg;
+        }
         return null;
     },
+
+    // 点击是否落在底图上 (考虑旋转)
+    ptInBg(p, bg) {
+        const cx = bg.x + bg.w/2, cy = bg.y + bg.h/2;
+        const rad = -(bg.rot || 0) * Math.PI / 180;
+        const lx = Math.cos(rad)*(p.x-cx) - Math.sin(rad)*(p.y-cy) + cx;
+        const ly = Math.sin(rad)*(p.x-cx) + Math.cos(rad)*(p.y-cy) + cy;
+        return lx >= bg.x && lx <= bg.x+bg.w && ly >= bg.y && ly <= bg.y+bg.h;
+    },
     ptInObj(p, o) {
+        if (o.type === 'bgImage') {
+            return this.ptInBg(p, o);
+        }
         if (o.type === 'wall' || o.type==='door' || o.type==='window') {
             return distToSeg(p, {x:o.x1,y:o.y1}, {x:o.x2,y:o.y2}) < 8;
         }
@@ -964,7 +1214,7 @@ const app = {
         return false;
     },
     hitHandle(p, o) {
-        if (o.type !== 'furniture' && o.type !== 'stairs') return null;
+        if (o.type !== 'furniture' && o.type !== 'stairs' && o.type !== 'bgImage') return null;
         const hs = 6 / this.viewport.zoom;
         const pts = {
             'nw':{x:o.x, y:o.y}, 'ne':{x:o.x+o.w, y:o.y},
@@ -988,6 +1238,9 @@ const app = {
         return 0; // 0=整体
     },
     bboxOf(o) {
+        if (o.type === 'bgImage') {
+            return {x:o.x, y:o.y, w:o.w, h:o.h};
+        }
         if (o.type==='wall'||o.type==='door'||o.type==='window') {
             const xs=[o.x1,o.x2], ys=[o.y1,o.y2];
             return {x:Math.min(...xs), y:Math.min(...ys), w:Math.abs(o.x2-o.x1)||10, h:Math.abs(o.y2-o.y1)||10};
@@ -1004,6 +1257,30 @@ const app = {
     /* ========== 渲染 ========== */
     render() {
         this.layerObj.innerHTML = '';
+
+        // 最底层: 当前楼层底图
+        const bg = this.floors[this.currentFloor].bgImage;
+        if (bg && bg.visible !== false) {
+            const ns = 'http://www.w3.org/2000/svg';
+            const img = document.createElementNS(ns, 'image');
+            img.setAttributeNS('http://www.w3.org/1999/xlink', 'href', bg.src);
+            img.setAttribute('href', bg.src);
+            img.setAttribute('x', bg.x);
+            img.setAttribute('y', bg.y);
+            img.setAttribute('width', bg.w);
+            img.setAttribute('height', bg.h);
+            img.setAttribute('opacity', bg.opacity != null ? bg.opacity : 0.5);
+            img.setAttribute('preserveAspectRatio', 'none');
+            if (bg.rot) {
+                img.setAttribute('transform',
+                    `rotate(${bg.rot} ${bg.x + bg.w/2} ${bg.y + bg.h/2})`);
+            }
+            // 统一用 none：hitTest 由 JS 在坐标系中判定，这样避免 SVG 事件拦截墙/家具
+            img.setAttribute('pointer-events', 'none');
+            img.setAttribute('data-bg', '1');
+            this.layerObj.appendChild(img);
+        }
+
         this.objects.forEach(o => {
             const g = this.renderObj(o);
             if (g) this.layerObj.appendChild(g);
@@ -1319,7 +1596,7 @@ const app = {
         const ns = 'http://www.w3.org/2000/svg';
         const b = this.bboxOf(o); if (!b) return;
 
-        if (o.type==='furniture' || o.type==='stairs') {
+        if (o.type==='furniture' || o.type==='stairs' || o.type==='bgImage') {
             const cx = o.x+o.w/2, cy=o.y+o.h/2;
             const g = document.createElementNS(ns,'g');
             g.setAttribute('transform', `translate(${cx},${cy}) rotate(${o.rot||0}) translate(${-cx},${-cy})`);
@@ -1487,10 +1764,67 @@ const app = {
         const p = document.getElementById('props');
         const o = this.selected;
         if (!o) {
-            p.innerHTML = '<h3>属性</h3><div class="empty-hint">未选中对象<br><br>📌 快速上手<br>• 左侧工具：房间/L型/T型 一键画<br>• 图形库：拖拽到画布<br>• 滚轮缩放 · 中键/Space 平移<br>• 选中后看到到墙的相对距离<br>• 📏 按钮 = 外墙自动尺寸标注<br>• Delete删除 · Ctrl+D复制 · R旋转</div>';
+            const bg = this.floors[this.currentFloor].bgImage;
+            let bgHint = '';
+            if (bg) {
+                const status = bg.visible === false ? '已隐藏' : (bg.locked ? '已锁定' : '可编辑');
+                bgHint = `
+                  <div style="margin-top:16px;padding:10px;background:#fef3c7;border-radius:4px;font-size:12px;color:#92400e;">
+                    🖼 当前楼层有底图（${status}）<br>
+                    <div style="display:flex;gap:4px;margin-top:6px;">
+                      <button style="flex:1;padding:4px;background:#f59e0b;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:11px;" onclick="app.toggleBgVisible()">显/隐</button>
+                      <button style="flex:1;padding:4px;background:#3b82f6;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:11px;" onclick="app.setBgProp('locked', !app.floors[app.currentFloor].bgImage.locked); app.updatePropsPanel();">${bg.locked ? '解锁' : '锁定'}</button>
+                      <button style="flex:1;padding:4px;background:#a54040;color:#fff;border:none;border-radius:3px;cursor:pointer;font-size:11px;" onclick="app.removeBackground()">移除</button>
+                    </div>
+                    <div style="margin-top:6px;color:#78350f;font-size:11px;">点击底图可选中编辑</div>
+                  </div>`;
+            }
+            p.innerHTML = '<h3>属性</h3><div class="empty-hint">未选中对象<br><br>📌 快速上手<br>• 左侧工具：房间/L型/T型 一键画<br>• 图形库：拖拽到画布<br>• 滚轮缩放 · 中键/Space 平移<br>• 选中后看到到墙的相对距离<br>• 📏 按钮 = 外墙自动尺寸标注<br>• 🖼 底图：导入扫描图描图<br>• Delete删除 · Ctrl+D复制 · R旋转</div>' + bgHint;
             this.tip.style.display='none';
             return;
         }
+        // 底图选中 → 专属面板
+        if (o.type === 'bgImage') {
+            p.innerHTML = `
+              <h3>🖼 底图</h3>
+              <div class="prop-row"><label>透明度</label>
+                <input type="range" min="0.1" max="1" step="0.05" value="${o.opacity != null ? o.opacity : 0.5}"
+                       oninput="app.setProp('opacity',+this.value)"></div>
+              <div class="prop-row"><label>可见</label>
+                <input type="checkbox" ${o.visible !== false ? 'checked' : ''}
+                       onchange="app.setProp('visible',this.checked)"></div>
+              <div class="prop-row"><label>锁定</label>
+                <input type="checkbox" ${o.locked ? 'checked' : ''}
+                       onchange="app.setProp('locked',this.checked); app.select(null);"
+                       title="锁定后底图不能再被选中/拖动，防止描图时误操作"></div>
+              <div class="prop-row"><label>X (mm)</label>
+                <input type="number" value="${Math.round(o.x * MM_PER_UNIT)}"
+                       onchange="app.setProp('x', +this.value / ${MM_PER_UNIT})"></div>
+              <div class="prop-row"><label>Y (mm)</label>
+                <input type="number" value="${Math.round(o.y * MM_PER_UNIT)}"
+                       onchange="app.setProp('y', +this.value / ${MM_PER_UNIT})"></div>
+              <div class="prop-row"><label>宽 (mm)</label>
+                <input type="number" value="${Math.round(o.w * MM_PER_UNIT)}"
+                       onchange="app.setProp('w', +this.value / ${MM_PER_UNIT})"></div>
+              <div class="prop-row"><label>高 (mm)</label>
+                <input type="number" value="${Math.round(o.h * MM_PER_UNIT)}"
+                       onchange="app.setProp('h', +this.value / ${MM_PER_UNIT})"></div>
+              <div class="prop-row"><label>旋转°</label>
+                <input type="number" step="1" value="${o.rot || 0}"
+                       onchange="app.setProp('rot',+this.value)"></div>
+              <div style="margin-top:10px;padding:8px;background:#f9fafb;border-radius:4px;font-size:11px;color:#6b7280;line-height:1.6;">
+                💡 提示<br>
+                • 拖动四角缩放（保持比例）<br>
+                • Shift+拖角 = 自由变形<br>
+                • 按 <b>R</b> 旋转 90°<br>
+                • 按 <b>Delete</b> 移除底图
+              </div>
+              <button style="width:100%;margin-top:8px;padding:6px;background:#f59e0b;color:#fff;border:none;border-radius:4px;cursor:pointer;" onclick="app.calibrateBackground()">📐 两点重新标定</button>
+              <button style="width:100%;margin-top:4px;padding:6px;background:#a54040;color:#fff;border:none;border-radius:4px;cursor:pointer;" onclick="app.deleteSelected()">移除底图</button>
+            `;
+            return;
+        }
+
         let html = `<h3>${typeLabel(o.type)} ${o.name?'· '+o.name:''}</h3>`;
         const row = (label, input) => `<div class="prop-row"><label>${label}</label>${input}</div>`;
         const ni = (k, step=1) => `<input type="number" step="${step}" value="${Math.round((o[k]||0)*MM_PER_UNIT)}" onchange="app.setProp('${k}', this.value/${MM_PER_UNIT})">`;
@@ -1664,6 +1998,12 @@ const app = {
             svg += `<g transform="translate(${p.offX},${offY})">\n`;
             // 楼层标题
             svg += `<text x="${p.b.x + p.b.w/2}" y="${p.b.y - 25}" text-anchor="middle" font-size="22" font-weight="bold" fill="#222">${escapeXml(f.name)}</text>\n`;
+            // 底图（如果存在且可见）
+            if (f.bgImage && f.bgImage.visible !== false) {
+                const bg = f.bgImage;
+                const tf = bg.rot ? ` transform="rotate(${bg.rot} ${bg.x+bg.w/2} ${bg.y+bg.h/2})"` : '';
+                svg += `<image href="${bg.src}" x="${bg.x}" y="${bg.y}" width="${bg.w}" height="${bg.h}" opacity="${bg.opacity!=null?bg.opacity:0.5}" preserveAspectRatio="none"${tf}/>\n`;
+            }
             // 对象
             const tmp = document.createElementNS('http://www.w3.org/2000/svg','g');
             // 暂切换 objects 引用给 renderObj 用
@@ -2364,7 +2704,7 @@ function distToSeg(p, a, b) {
 }
 
 function typeLabel(t) {
-    return {wall:'墙',door:'门',window:'窗',furniture:'家具',stairs:'楼梯',text:'文字'}[t] || t;
+    return {wall:'墙',door:'门',window:'窗',furniture:'家具',stairs:'楼梯',text:'文字',bgImage:'底图'}[t] || t;
 }
 
 function escapeXml(s) {
