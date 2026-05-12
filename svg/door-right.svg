@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 右开门 (铰链在右下角, 向内(上)开启90°) -->
+<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120">
+  <!-- 墙体 -->
+  <rect x="0"   y="100" width="15"  height="12" fill="#2c2c2c"/>
+  <rect x="105" y="100" width="15"  height="12" fill="#2c2c2c"/>
+  <!-- 门洞 -->
+  <rect x="15" y="100" width="90" height="12" fill="#ffffff"/>
+
+  <!-- 开启弧线 (以右铰链为圆心, 半径=90, 从 180° 到 270°) -->
+  <path d="M 15 106 A 90 90 0 0 1 105 16"
+        fill="none" stroke="#2c2c2c" stroke-width="1" stroke-dasharray="3,2"/>
+
+  <!-- 门扇 (从右铰链点垂直向上) -->
+  <line x1="105" y1="106" x2="105" y2="16" stroke="#2c2c2c" stroke-width="3" stroke-linecap="round"/>
+
+  <!-- 铰链标记 -->
+  <circle cx="105" cy="106" r="2.5" fill="#2c2c2c"/>
+</svg>

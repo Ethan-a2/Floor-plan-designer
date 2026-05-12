@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- 双开门 (两扇各 45° 向内开启)
+     左扇铰链在左, 向上开; 右扇铰链在右, 向上开
+     总宽 1800mm, 每扇 900mm -->
+<svg xmlns="http://www.w3.org/2000/svg" width="220" height="120" viewBox="0 0 220 120">
+  <!-- 墙体（两端）-->
+  <rect x="0"   y="100" width="15"  height="12" fill="#2c2c2c"/>
+  <rect x="205" y="100" width="15"  height="12" fill="#2c2c2c"/>
+  <!-- 门洞 -->
+  <rect x="15" y="100" width="190" height="12" fill="#ffffff"/>
+
+  <!-- 左扇 开启弧线 (铰链 15,106 半径 95) -->
+  <path d="M 110 106 A 95 95 0 0 0 15 11"
+        fill="none" stroke="#2c2c2c" stroke-width="1" stroke-dasharray="3,2"/>
+  <!-- 左扇门扇 -->
+  <line x1="15" y1="106" x2="15" y2="11" stroke="#2c2c2c" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="15" cy="106" r="2.5" fill="#2c2c2c"/>
+
+  <!-- 右扇 开启弧线 (铰链 205,106 半径 95) -->
+  <path d="M 110 106 A 95 95 0 0 1 205 11"
+        fill="none" stroke="#2c2c2c" stroke-width="1" stroke-dasharray="3,2"/>
+  <!-- 右扇门扇 -->
+  <line x1="205" y1="106" x2="205" y2="11" stroke="#2c2c2c" stroke-width="3" stroke-linecap="round"/>
+  <circle cx="205" cy="106" r="2.5" fill="#2c2c2c"/>
+</svg>

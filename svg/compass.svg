@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200">
+  <!-- 外圆 -->
+  <circle cx="100" cy="100" r="90" fill="#ffffff" stroke="#2c2c2c" stroke-width="2"/>
+  <!-- 内圆 -->
+  <circle cx="100" cy="100" r="70" fill="none" stroke="#2c2c2c" stroke-width="1"/>
+  <!-- 十字方向线 (浅) -->
+  <line x1="100" y1="30" x2="100" y2="170" stroke="#c0c0c0" stroke-width="0.8"/>
+  <line x1="30" y1="100" x2="170" y2="100" stroke="#c0c0c0" stroke-width="0.8"/>
+  <!-- 指北箭头 (北半，实心) -->
+  <polygon points="100,20 85,100 100,85 115,100" fill="#2c2c2c" stroke="#2c2c2c" stroke-width="1" stroke-linejoin="round"/>
+  <!-- 指南半 (空心) -->
+  <polygon points="100,180 85,100 100,115 115,100" fill="#ffffff" stroke="#2c2c2c" stroke-width="1" stroke-linejoin="round"/>
+  <!-- N 字 -->
+  <text x="100" y="15" text-anchor="middle" font-family="Arial, sans-serif" font-size="18" font-weight="bold" fill="#2c2c2c">N</text>
+  <!-- S -->
+  <text x="100" y="198" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#2c2c2c">S</text>
+  <!-- W -->
+  <text x="15" y="105" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#2c2c2c">W</text>
+  <!-- E -->
+  <text x="188" y="105" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#2c2c2c">E</text>
+  <!-- 中心点 -->
+  <circle cx="100" cy="100" r="3" fill="#2c2c2c"/>
+</svg>
