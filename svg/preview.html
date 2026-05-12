@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>SVG 组件预览</title>
+<style>
+  body { font-family: "Microsoft YaHei", sans-serif; padding: 20px; background: #f5f6f8; }
+  h1 { font-size: 18px; color: #333; margin-bottom: 20px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+  .card { background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; padding: 16px; }
+  .card h3 { font-size: 13px; color: #111; margin-bottom: 10px; }
+  .card .box { background: #fafafa; border: 1px dashed #d1d5db; display: flex; align-items: center; justify-content: center; padding: 20px; min-height: 160px; }
+  .card img { max-width: 100%; max-height: 200px; }
+  .meta { font-size: 11px; color: #6b7280; margin-top: 8px; font-family: monospace; }
+</style>
+</head>
+<body>
+  <h1>🎨 SVG 组件库预览</h1>
+  <div class="grid">
+    <div class="card">
+      <h3>🧭 指南针 (Compass)</h3>
+      <div class="box"><img src="compass.svg" alt="compass"></div>
+      <div class="meta">compass.svg · 200×200</div>
+    </div>
+    <div class="card">
+      <h3>🚪 左开门 (Door Left)</h3>
+      <div class="box"><img src="door-left.svg" alt="door-left"></div>
+      <div class="meta">door-left.svg · 120×120 · 门洞 900mm</div>
+    </div>
+    <div class="card">
+      <h3>🚪 右开门 (Door Right)</h3>
+      <div class="box"><img src="door-right.svg" alt="door-right"></div>
+      <div class="meta">door-right.svg · 120×120 · 门洞 900mm</div>
+    </div>
+    <div class="card">
+      <h3>🚪🚪 双开门 (Door Double)</h3>
+      <div class="box"><img src="door-double.svg" alt="door-double"></div>
+      <div class="meta">door-double.svg · 220×120 · 门洞 1800mm</div>
+    </div>
+    <div class="card">
+      <h3>🪟 滑动玻璃门 (Sliding)</h3>
+      <div class="box"><img src="door-sliding.svg" alt="door-sliding"></div>
+      <div class="meta">door-sliding.svg · 220×60 · 门洞 1800mm</div>
+    </div>
+  </div>
+  <p style="margin-top:20px;color:#6b7280;font-size:12px;">
+    在户型设计器中使用：点顶栏 <b>🎨 SVG</b> → 选择任意 .svg 文件 → 拖动定位 → 用 <b>📐 标定</b> 按实际尺寸缩放
+  </p>
+</body>
+</html>
