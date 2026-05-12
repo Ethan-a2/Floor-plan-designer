@@ -155,6 +155,7 @@ body { font-family: "Microsoft YaHei","PingFang SC","Segoe UI",sans-serif; heigh
                 <button class="tool-btn" data-tool="stairs" onclick="app.setTool('stairs')">📶 楼梯</button>
                 <button class="tool-btn" data-tool="text" onclick="app.setTool('text')">T 文字</button>
                 <button class="tool-btn" data-tool="measure" onclick="app.setTool('measure')" title="点两点测量距离 · Esc 清除">📏 皮尺</button>
+                <button class="tool-btn" data-tool="rect" onclick="app.setTool('rect')" title="拖出带填充色的矩形 (地板/房间着色)">⎕ 地板</button>
             </div>
         </div>
 
@@ -295,7 +296,7 @@ const app = {
         let objs = [];
         if (copyCurrent) {
             // 只复制结构性对象 (墙/门/窗/楼梯), 不复制家具和文字
-            const src = this.objects.filter(o => ['wall','door','window','stairs'].includes(o.type));
+            const src = this.objects.filter(o => ['wall','door','window','stairs','rect'].includes(o.type));
             objs = JSON.parse(JSON.stringify(src));
             objs.forEach(o => o.id = this.nextId++);
         }
@@ -887,7 +888,7 @@ const app = {
         document.querySelectorAll('.tool-btn').forEach(b=>b.classList.toggle('active', b.dataset.tool===t));
         this.svg.className.baseVal = 'tool-'+t;
         document.getElementById('stTool').textContent = {
-            select:'选择', wall:'墙', 'room':'矩形房间', 'room-l':'L型房间', 'room-t':'T型房间', door:'门', window:'窗', text:'文字', stairs:'楼梯', measure:'皮尺'
+            select:'选择', wall:'墙', 'room':'矩形房间', 'room-l':'L型房间', 'room-t':'T型房间', door:'门', window:'窗', text:'文字', stairs:'楼梯', measure:'皮尺', rect:'地板'
         }[t] || t;
         if (t !== 'select') this.select(null);
         // 切换工具时只取消正在画的预览；已保存的测量是普通对象，不动
@@ -936,10 +937,24 @@ const app = {
             this.drawing = { type:'door', x1:sp.x, y1:sp.y, x2:sp.x, y2:sp.y, swing:'in', id:this.nextId++ };
         }
         else if (this.tool === 'window') {
-            this.drawing = { type:'window', x1:sp.x, y1:sp.y, x2:sp.x, y2:sp.y, id:this.nextId++ };
+            this.drawing = { type:'window', x1:sp.x, y1:sp.y, x2:sp.x, y2:sp.y, thickness:10, id:this.nextId++ };
         }
         else if (this.tool === 'stairs') {
             this.drawing = { type:'stairs', x:sp.x, y:sp.y, w:0, h:0, steps:10, dir:'up', rot:0, id:this.nextId++ };
+        }
+        else if (this.tool === 'rect') {
+            // 默认下一个轮流切换的淡色: 浅黄/浅蓝/浅绿/浅粉/浅紫
+            const palette = ['#fef3c7','#dbeafe','#dcfce7','#fce7f3','#ede9fe','#ffedd5'];
+            const existingRects = this.objects.filter(o => o.type === 'rect').length;
+            const color = palette[existingRects % palette.length];
+            this.drawing = {
+                type:'rect',
+                x: sp.x, y: sp.y, w: 0, h: 0,
+                color, opacity: 0.6,
+                rot: 0,
+                name: '',
+                id: this.nextId++
+            };
         }
         else if (this.tool === 'room' || this.tool === 'room-l' || this.tool === 'room-t') {
             this.drawing = { type:'room-preview', shape:this.tool, x:sp.x, y:sp.y, w:0, h:0 };
@@ -1054,6 +1069,10 @@ const app = {
             } else if (dr.type === 'stairs') {
                 dr.w = Math.max(GRID, sp.x - dr.x);
                 dr.h = Math.max(GRID, sp.y - dr.y);
+            } else if (dr.type === 'rect') {
+                // 支持向左/向上拖 (负宽高)，mouseUp 时规范化
+                dr.w = sp.x - dr.x;
+                dr.h = sp.y - dr.y;
             } else if (dr.type === 'room-preview') {
                 dr.w = sp.x - dr.x;
                 dr.h = sp.y - dr.y;
@@ -1088,6 +1107,23 @@ const app = {
                 if (len < GRID) valid = false;
             } else if (dr.type==='stairs') {
                 if (dr.w < GRID*2 || dr.h < GRID*2) valid = false;
+            } else if (dr.type==='rect') {
+                // 规范化: 允许任意方向拖, 统一为 x,y 左上 + 正宽高
+                if (dr.w < 0) { dr.x += dr.w; dr.w = -dr.w; }
+                if (dr.h < 0) { dr.y += dr.h; dr.h = -dr.h; }
+                if (dr.w < GRID*2 || dr.h < GRID*2) valid = false;
+                if (valid) {
+                    // 地板自动置底: unshift 而非 push
+                    this.objects.unshift(dr);
+                    this.select(dr);
+                    this.render();
+                    this.pushHistory();
+                }
+                this.drawing = null;
+                this.layerOv.innerHTML = '';
+                this.tip.style.display='none';
+                this.render();
+                return;
             } else if (dr.type==='room-preview') {
                 if (Math.abs(dr.w) < GRID*2 || Math.abs(dr.h) < GRID*2) valid = false;
                 if (valid) this.emitRoomWalls(dr);
@@ -1292,7 +1328,7 @@ const app = {
         if (o.type === 'wall' || o.type==='door' || o.type==='window' || o.type==='measure') {
             return distToSeg(p, {x:o.x1,y:o.y1}, {x:o.x2,y:o.y2}) < 8;
         }
-        if (o.type === 'furniture' || o.type==='stairs') {
+        if (o.type === 'furniture' || o.type==='stairs' || o.type==='rect') {
             // 考虑旋转: 把点反向旋转到对象本地
             const cx = o.x + o.w/2, cy = o.y + o.h/2;
             const rad = -(o.rot||0) * Math.PI/180;
@@ -1307,7 +1343,7 @@ const app = {
         return false;
     },
     hitHandle(p, o) {
-        if (!['furniture','stairs','image','svg'].includes(o.type)) return null;
+        if (!['furniture','stairs','image','svg','rect'].includes(o.type)) return null;
         const hs = 6 / this.viewport.zoom;
         const pts = {
             'nw':{x:o.x, y:o.y}, 'ne':{x:o.x+o.w, y:o.y},
@@ -1338,7 +1374,7 @@ const app = {
             const xs=[o.x1,o.x2], ys=[o.y1,o.y2];
             return {x:Math.min(...xs), y:Math.min(...ys), w:Math.abs(o.x2-o.x1)||10, h:Math.abs(o.y2-o.y1)||10};
         }
-        if (o.type==='furniture'||o.type==='stairs') return {x:o.x, y:o.y, w:o.w, h:o.h};
+        if (o.type==='furniture'||o.type==='stairs'||o.type==='rect') return {x:o.x, y:o.y, w:o.w, h:o.h};
         if (o.type==='room-preview') {
             let {x,y,w,h}=o; if (w<0){x+=w;w=-w;} if (h<0){y+=h;h=-h;}
             return {x,y,w:w||10,h:h||10};
@@ -1611,6 +1647,36 @@ const app = {
             return g;
         }
 
+        if (o.type === 'rect') {
+            // 支持绘制预览期的负宽高 (preview=true 时)
+            let x = o.x, y = o.y, w = o.w, h = o.h;
+            if (w < 0) { x += w; w = -w; }
+            if (h < 0) { y += h; h = -h; }
+            const r = document.createElementNS(ns,'rect');
+            r.setAttribute('x', x); r.setAttribute('y', y);
+            r.setAttribute('width', w); r.setAttribute('height', h);
+            r.setAttribute('fill', o.color || '#fef3c7');
+            r.setAttribute('fill-opacity', o.opacity != null ? o.opacity : 0.6);
+            r.setAttribute('stroke', 'none');
+            if (o.rot) {
+                r.setAttribute('transform', `rotate(${o.rot} ${x+w/2} ${y+h/2})`);
+            }
+            g.appendChild(r);
+            // 中心标签 (名称)
+            if (o.name) {
+                const t = document.createElementNS(ns,'text');
+                t.setAttribute('x', x + w/2);
+                t.setAttribute('y', y + h/2 + 4);
+                t.setAttribute('text-anchor', 'middle');
+                t.setAttribute('font-size', '12');
+                t.setAttribute('fill', '#4b5563');
+                t.setAttribute('pointer-events', 'none');
+                t.textContent = o.name;
+                g.appendChild(t);
+            }
+            return g;
+        }
+
         if (o.type === 'room-preview') {
             let { x, y, w, h } = o;
             if (w < 0) { x += w; w = -w; }
@@ -1636,15 +1702,16 @@ const app = {
             g.appendChild(line);
         }
         else if (o.type === 'window') {
+            const th = o.thickness || 10;  // 默认 10 user-unit = 100mm
             const line = document.createElementNS(ns,'line');
             line.setAttribute('x1',o.x1); line.setAttribute('y1',o.y1);
             line.setAttribute('x2',o.x2); line.setAttribute('y2',o.y2);
-            line.setAttribute('stroke','#1a7fc9'); line.setAttribute('stroke-width',10);
+            line.setAttribute('stroke','#1a7fc9'); line.setAttribute('stroke-width', th);
             g.appendChild(line);
             const inner = document.createElementNS(ns,'line');
             inner.setAttribute('x1',o.x1); inner.setAttribute('y1',o.y1);
             inner.setAttribute('x2',o.x2); inner.setAttribute('y2',o.y2);
-            inner.setAttribute('stroke','#fff'); inner.setAttribute('stroke-width',4);
+            inner.setAttribute('stroke','#fff'); inner.setAttribute('stroke-width', th * 0.4);
             g.appendChild(inner);
         }
         else if (o.type === 'door') {
@@ -1793,7 +1860,7 @@ const app = {
         const ns = 'http://www.w3.org/2000/svg';
         const b = this.bboxOf(o); if (!b) return;
 
-        if (['furniture','stairs','image','svg'].includes(o.type)) {
+        if (['furniture','stairs','image','svg','rect'].includes(o.type)) {
             const cx = o.x+o.w/2, cy=o.y+o.h/2;
             const g = document.createElementNS(ns,'g');
             g.setAttribute('transform', `translate(${cx},${cy}) rotate(${o.rot||0}) translate(${-cx},${-cy})`);
@@ -2003,7 +2070,8 @@ const app = {
             html += row('Y2 (mm)', ni('y2'));
             const len = Math.round(Math.hypot(o.x2-o.x1,o.y2-o.y1)*MM_PER_UNIT);
             html += row('长度', `<input type="number" value="${len}" onchange="app.setLength(this.value)">`);
-            if (o.type==='wall') html += row('墙厚(px)', `<input type="number" value="${o.thickness||24}" onchange="app.setProp('thickness', +this.value)">`);
+            if (o.type==='wall') html += row('墙厚 (mm)', `<input type="number" step="10" value="${Math.round((o.thickness||24)*MM_PER_UNIT/10)*10}" onchange="app.setProp('thickness', +this.value/${MM_PER_UNIT})">`);
+            if (o.type==='window') html += row('窗厚 (mm)', `<input type="number" step="10" value="${Math.round((o.thickness||10)*MM_PER_UNIT/10)*10}" onchange="app.setProp('thickness', +this.value/${MM_PER_UNIT})">`);
             if (o.type==='measure') {
                 const dx = Math.round(Math.abs(o.x2-o.x1)*MM_PER_UNIT);
                 const dy = Math.round(Math.abs(o.y2-o.y1)*MM_PER_UNIT);
@@ -2017,7 +2085,7 @@ const app = {
                 </div>`;
             }
         }
-        else if (o.type==='furniture' || o.type==='stairs') {
+        else if (o.type==='furniture' || o.type==='stairs' || o.type==='rect') {
             html += row('X (mm)', ni('x'));
             html += row('Y (mm)', ni('y'));
             html += row('宽 (mm)', ni('w'));
@@ -2030,6 +2098,11 @@ const app = {
             if (o.type==='stairs') {
                 html += row('踏步数', `<input type="number" value="${o.steps||10}" onchange="app.setProp('steps',+this.value)">`);
                 html += row('方向', `<select onchange="app.setProp('dir',this.value)"><option value="up" ${o.dir!=='down'?'selected':''}>向上</option><option value="down" ${o.dir==='down'?'selected':''}>向下</option></select>`);
+            }
+            if (o.type==='rect') {
+                html += row('名称', `<input type="text" value="${escapeXml(o.name||'')}" placeholder="如: 客厅/卧室" onchange="app.setProp('name', this.value)">`);
+                html += row('填充色', `<input type="color" value="${o.color||'#fef3c7'}" onchange="app.setProp('color', this.value)">`);
+                html += row('透明度', `<input type="range" min="0.1" max="1" step="0.05" value="${o.opacity != null ? o.opacity : 0.6}" oninput="app.setProp('opacity',+this.value)">`);
             }
         }
         else if (o.type==='text') {
@@ -2913,7 +2986,7 @@ function distToSeg(p, a, b) {
 }
 
 function typeLabel(t) {
-    return {wall:'墙',door:'门',window:'窗',furniture:'家具',stairs:'楼梯',text:'文字',image:'🖼 图像',svg:'🎨 SVG',measure:'📏 测量'}[t] || t;
+    return {wall:'墙',door:'门',window:'窗',furniture:'家具',stairs:'楼梯',text:'文字',image:'🖼 图像',svg:'🎨 SVG',measure:'📏 测量',rect:'⎕ 地板'}[t] || t;
 }
 
 function escapeXml(s) {
