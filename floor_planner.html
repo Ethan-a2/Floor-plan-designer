@@ -106,7 +106,7 @@ body { font-family: "Microsoft YaHei","PingFang SC","Segoe UI",sans-serif; heigh
     <button onclick="app.undo()" title="Ctrl+Z">↶ 撤销</button>
     <button onclick="app.redo()" title="Ctrl+Y">↷ 重做</button>
     <div class="sep"></div>
-    <button onclick="app.duplicate()" title="Ctrl+D">📋 复制</button>
+    <button onclick="app.duplicate()" title="Ctrl+C / Ctrl+D">📋 复制</button>
     <button onclick="app.deleteSelected()" title="Delete">🗑 删除</button>
     <button onclick="app.rotateSelected()" title="R">⟳ 旋转90°</button>
     <div class="sep"></div>
@@ -1125,15 +1125,41 @@ const app = {
     },
 
     onKey(e) {
-        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+        const tag = e.target && e.target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA') return;
         if (e.code === 'Space') { this.spaceDown = true; e.preventDefault(); return;}
         if (e.key === 'Delete' || e.key === 'Backspace') { this.deleteSelected(); e.preventDefault(); }
         else if (e.key === 'r' || e.key === 'R') { this.rotateSelected(); }
         else if (e.key === 'Escape') { this.drawing = null; this.layerOv.innerHTML=''; this.select(null); this.setTool('select'); this.render();}
         else if (e.ctrlKey && e.key === 'z') { this.undo(); e.preventDefault(); }
         else if (e.ctrlKey && (e.key === 'y' || (e.shiftKey && e.key==='Z'))) { this.redo(); e.preventDefault(); }
-        else if (e.ctrlKey && e.key === 'd') { this.duplicate(); e.preventDefault(); }
+        else if (e.ctrlKey && (e.key === 'd' || e.key === 'c' || e.key === 'C')) { this.duplicate(); e.preventDefault(); }
         else if (e.ctrlKey && e.key === 's') { this.saveJSON(); e.preventDefault(); }
+        // 方向键移动选中对象
+        else if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) {
+            if (!this.selected) return;
+            const step = e.shiftKey ? GRID * 10 : GRID;  // Shift = 10x
+            let dx = 0, dy = 0;
+            if (e.key === 'ArrowUp')    dy = -step;
+            if (e.key === 'ArrowDown')  dy =  step;
+            if (e.key === 'ArrowLeft')  dx = -step;
+            if (e.key === 'ArrowRight') dx =  step;
+            this.nudgeSelected(dx, dy);
+            e.preventDefault();
+        }
+    },
+
+    // 平移选中对象 (键盘微调)；连续按键合并为一次历史记录
+    nudgeSelected(dx, dy) {
+        const o = this.selected;
+        if (!o) return;
+        if ('x' in o && 'y' in o) { o.x += dx; o.y += dy; }
+        if ('x1' in o) { o.x1 += dx; o.y1 += dy; o.x2 += dx; o.y2 += dy; }
+        this.render();
+        this.updatePropsPanel();
+        // 防抖: 350ms 内连续 nudge 只记一次历史
+        clearTimeout(this._nudgeTimer);
+        this._nudgeTimer = setTimeout(() => this.pushHistory(), 350);
     },
 
     /* ========== 对象管理 ========== */
@@ -1792,7 +1818,7 @@ const app = {
                     🖼 当前楼层有 ${imageCount} 个图像组件，点击即可编辑
                   </div>`;
             }
-            p.innerHTML = '<h3>属性</h3><div class="empty-hint">未选中对象<br><br>📌 快速上手<br>• 左侧工具：房间/L型/T型 一键画<br>• 图形库：拖拽到画布<br>• 🖼 底图：置底半透明，适合描图<br>• 📎 图片 / 🎨 SVG：作为组件插入<br>• 每个对象可独立显示/隐藏、调整图层<br>• 滚轮缩放 · 中键/Space 平移<br>• Delete删除 · Ctrl+D复制 · R旋转</div>' + imageHint;
+            p.innerHTML = '<h3>属性</h3><div class="empty-hint">未选中对象<br><br>📌 快速上手<br>• 左侧工具：房间/L型/T型 一键画<br>• 图形库：拖拽到画布<br>• 🖼 底图：置底半透明，适合描图<br>• 📎 图片 / 🎨 SVG：作为组件插入<br>• 每个对象可独立显示/隐藏、调整图层<br>• 滚轮缩放 · 中键/Space 平移<br>• 方向键微移 (Shift=10×)<br>• Delete删除 · Ctrl+C/D复制 · R旋转</div>' + imageHint;
             this.tip.style.display='none';
             return;
         }
