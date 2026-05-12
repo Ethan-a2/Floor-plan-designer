@@ -154,6 +154,7 @@ body { font-family: "Microsoft YaHei","PingFang SC","Segoe UI",sans-serif; heigh
                 <button class="tool-btn" data-tool="window" onclick="app.setTool('window')">🪟 窗</button>
                 <button class="tool-btn" data-tool="stairs" onclick="app.setTool('stairs')">📶 楼梯</button>
                 <button class="tool-btn" data-tool="text" onclick="app.setTool('text')">T 文字</button>
+                <button class="tool-btn" data-tool="measure" onclick="app.setTool('measure')" title="点两点测量距离 · Esc 清除">📏 皮尺</button>
             </div>
         </div>
 
@@ -201,6 +202,10 @@ body { font-family: "Microsoft YaHei","PingFang SC","Segoe UI",sans-serif; heigh
     <span>坐标: <span class="v" id="stCoord">0, 0</span> mm</span>
     <span>对象: <span class="v" id="stCount">0</span></span>
     <span>图形: <span class="v" id="stShapes">0</span></span>
+    <span id="stMeasure" style="display:none;color:#dc2626;">
+        📏 <span class="v" style="color:#dc2626;" id="stMeasureText">--</span>
+        <button onclick="app.clearMeasures()" style="margin-left:8px;background:none;border:1px solid #dc2626;color:#dc2626;padding:1px 6px;border-radius:3px;cursor:pointer;font-size:10px;">清除</button>
+    </span>
     <div class="zoom-slider">
         <button class="zoom-btn" onclick="app.zoomFit()" title="适应窗口">⛶</button>
         <button class="zoom-btn" onclick="app.zoomOut()">−</button>
@@ -248,6 +253,8 @@ const app = {
     historyIdx: -1,
     drawing: null,                // 正在绘制的临时对象
     dragState: null,              // 拖动状态
+    measures: [],                 // 已固化的测量线 [{x1,y1,x2,y2}]
+    measuring: null,              // 正在画的测量线
 
     init() {
         this.svg = document.getElementById('canvas');
@@ -881,9 +888,11 @@ const app = {
         document.querySelectorAll('.tool-btn').forEach(b=>b.classList.toggle('active', b.dataset.tool===t));
         this.svg.className.baseVal = 'tool-'+t;
         document.getElementById('stTool').textContent = {
-            select:'选择', wall:'墙', 'room':'矩形房间', 'room-l':'L型房间', 'room-t':'T型房间', door:'门', window:'窗', text:'文字', stairs:'楼梯'
+            select:'选择', wall:'墙', 'room':'矩形房间', 'room-l':'L型房间', 'room-t':'T型房间', door:'门', window:'窗', text:'文字', stairs:'楼梯', measure:'皮尺'
         }[t] || t;
         if (t !== 'select') this.select(null);
+        // 切换到非 measure 时清除测量
+        if (t !== 'measure') { this.measuring = null; this.renderMeasures(); }
     },
 
     /* ========== 鼠标事件 ========== */
@@ -942,6 +951,21 @@ const app = {
                 this.addObject({ type:'text', x:sp.x, y:sp.y, text:txt, size:16, color:'#2c3e50', rot:0, id:this.nextId++ });
                 this.setTool('select');
             }
+        }
+        else if (this.tool === 'measure') {
+            // 第一次点 = 起点; 第二次点 = 终点并固化
+            if (!this.measuring) {
+                this.measuring = { x1: sp.x, y1: sp.y, x2: sp.x, y2: sp.y };
+            } else {
+                const m = this.measuring;
+                m.x2 = sp.x; m.y2 = sp.y;
+                // 距离 >= 1 grid 才保存
+                if (Math.hypot(m.x2-m.x1, m.y2-m.y1) >= GRID) {
+                    this.measures.push({...m});
+                }
+                this.measuring = null;
+            }
+            this.renderMeasures();
         }
     },
 
@@ -1031,6 +1055,21 @@ const app = {
             }
             this.renderPreview();
             this.showDim(dr);
+        }
+        else if (this.measuring) {
+            // 实时预览测量线: Shift 解除正交约束
+            this.measuring.x2 = sp.x;
+            this.measuring.y2 = sp.y;
+            if (e.shiftKey) {
+                // Shift 自由角度 (默认已经是自由的, 这里反转: 默认自由, Shift 变正交)
+            }
+            // 默认自由；如需正交按 Shift: 这里简单处理，按 Shift 切换到正交
+            if (e.shiftKey) {
+                const m = this.measuring;
+                const dx = Math.abs(m.x2 - m.x1), dy = Math.abs(m.y2 - m.y1);
+                if (dx > dy) m.y2 = m.y1; else m.x2 = m.x1;
+            }
+            this.renderMeasures();
         }
     },
 
@@ -1130,7 +1169,17 @@ const app = {
         if (e.code === 'Space') { this.spaceDown = true; e.preventDefault(); return;}
         if (e.key === 'Delete' || e.key === 'Backspace') { this.deleteSelected(); e.preventDefault(); }
         else if (e.key === 'r' || e.key === 'R') { this.rotateSelected(); }
-        else if (e.key === 'Escape') { this.drawing = null; this.layerOv.innerHTML=''; this.select(null); this.setTool('select'); this.render();}
+        else if (e.key === 'Escape') {
+            this.drawing = null;
+            // 在皮尺工具: Esc 清除测量但保持工具；其他工具: 退出到选择
+            if (this.tool === 'measure') {
+                this.clearMeasures();
+            } else {
+                this.select(null);
+                this.setTool('select');
+            }
+            this.render();
+        }
         else if (e.ctrlKey && e.key === 'z') { this.undo(); e.preventDefault(); }
         else if (e.ctrlKey && (e.key === 'y' || (e.shiftKey && e.key==='Z'))) { this.redo(); e.preventDefault(); }
         else if (e.ctrlKey && (e.key === 'd' || e.key === 'c' || e.key === 'C')) { this.duplicate(); e.preventDefault(); }
@@ -1311,6 +1360,7 @@ const app = {
         this.layerOv.innerHTML = '';
         if (this.showDims) this.renderDimensions(this.layerOv);
         if (this.selected) this.drawSelection(this.selected);
+        this._drawMeasures();
         document.getElementById('stCount').textContent = this.objects.length;
         this.updateMinimap();
     },
@@ -1496,6 +1546,138 @@ const app = {
             const g = this.renderObj(this.drawing, true);
             if (g) this.layerOv.appendChild(g);
         }
+        this._drawMeasures();  // 测量线也保留
+    },
+
+    // 外部入口：重绘测量线
+    renderMeasures() {
+        // 清除旧的测量层内容，重画所有叠加层
+        this.layerOv.innerHTML = '';
+        if (this.showDims) this.renderDimensions(this.layerOv);
+        if (this.selected) this.drawSelection(this.selected);
+        if (this.drawing) {
+            const g = this.renderObj(this.drawing, true);
+            if (g) this.layerOv.appendChild(g);
+        }
+        this._drawMeasures();
+    },
+
+    // 真正的绘制逻辑（内部）
+    _drawMeasures() {
+        const all = [...this.measures];
+        if (this.measuring) all.push(this.measuring);
+
+        // 状态栏更新
+        const stEl = document.getElementById('stMeasure');
+        const stText = document.getElementById('stMeasureText');
+        if (stEl && stText) {
+            if (all.length === 0) {
+                stEl.style.display = 'none';
+            } else {
+                stEl.style.display = '';
+                const last = all[all.length - 1];
+                const len = Math.hypot(last.x2-last.x1, last.y2-last.y1) * MM_PER_UNIT;
+                const dx = Math.abs(last.x2-last.x1) * MM_PER_UNIT;
+                const dy = Math.abs(last.y2-last.y1) * MM_PER_UNIT;
+                const suffix = this.measures.length > 1 ? ` · 共${this.measures.length}条` : '';
+                stText.textContent = `${len.toFixed(0)}mm (Δ ${dx.toFixed(0)}×${dy.toFixed(0)})${suffix}`;
+            }
+        }
+
+        if (all.length === 0) return;
+
+        const ns = 'http://www.w3.org/2000/svg';
+        const z = this.viewport.zoom || 1;
+        const TICK = 6 / z;           // 端点小十字边长
+        const FS = 12 / z;            // 字号
+        const LINE_W = 1.5 / z;       // 线宽
+
+        all.forEach((m, idx) => {
+            const isPreview = (idx === all.length - 1 && this.measuring);
+            const dxUnit = m.x2 - m.x1, dyUnit = m.y2 - m.y1;
+            const lenMm = Math.hypot(dxUnit, dyUnit) * MM_PER_UNIT;
+            if (lenMm < 1) return;
+
+            const g = document.createElementNS(ns, 'g');
+            g.setAttribute('pointer-events', 'none');
+            if (isPreview) g.setAttribute('opacity', '0.7');
+
+            // 主线（红色虚线）
+            const ln = document.createElementNS(ns, 'line');
+            ln.setAttribute('x1', m.x1); ln.setAttribute('y1', m.y1);
+            ln.setAttribute('x2', m.x2); ln.setAttribute('y2', m.y2);
+            ln.setAttribute('stroke', '#dc2626');
+            ln.setAttribute('stroke-width', LINE_W);
+            ln.setAttribute('stroke-dasharray', `${6/z},${3/z}`);
+            g.appendChild(ln);
+
+            // 两端小十字
+            [[m.x1, m.y1], [m.x2, m.y2]].forEach(([px, py]) => {
+                const h = document.createElementNS(ns, 'line');
+                h.setAttribute('x1', px - TICK); h.setAttribute('y1', py);
+                h.setAttribute('x2', px + TICK); h.setAttribute('y2', py);
+                h.setAttribute('stroke', '#dc2626'); h.setAttribute('stroke-width', LINE_W);
+                g.appendChild(h);
+                const v = document.createElementNS(ns, 'line');
+                v.setAttribute('x1', px); v.setAttribute('y1', py - TICK);
+                v.setAttribute('x2', px); v.setAttribute('y2', py + TICK);
+                v.setAttribute('stroke', '#dc2626'); v.setAttribute('stroke-width', LINE_W);
+                g.appendChild(v);
+            });
+
+            // 文字标签（中点附近）: 距离、Δ角度
+            const midX = (m.x1 + m.x2) / 2, midY = (m.y1 + m.y2) / 2;
+            const angleDeg = Math.atan2(dyUnit, dxUnit) * 180 / Math.PI;
+            const dxMm = Math.abs(dxUnit) * MM_PER_UNIT;
+            const dyMm = Math.abs(dyUnit) * MM_PER_UNIT;
+            const label = `${lenMm.toFixed(0)} mm  (Δ ${dxMm.toFixed(0)}×${dyMm.toFixed(0)}, ${angleDeg.toFixed(1)}°)`;
+
+            // 文字沿线方向，但不倒置
+            let textAngle = angleDeg;
+            if (textAngle > 90 || textAngle < -90) textAngle += 180;
+
+            // 背景矩形（为了可读性）
+            const padX = 4 / z, padY = 2 / z;
+            const estW = label.length * FS * 0.55;
+            const estH = FS * 1.3;
+            // 计算文字垂直方向偏移（稍微离线 4px）
+            const offDist = 6 / z;
+            const nx = -dyUnit / (Math.hypot(dxUnit, dyUnit) || 1);
+            const ny =  dxUnit / (Math.hypot(dxUnit, dyUnit) || 1);
+            const tx = midX + nx * offDist;
+            const ty = midY + ny * offDist;
+
+            const bg = document.createElementNS(ns, 'rect');
+            bg.setAttribute('x', tx - estW/2 - padX);
+            bg.setAttribute('y', ty - estH/2 - padY);
+            bg.setAttribute('width', estW + padX*2);
+            bg.setAttribute('height', estH + padY*2);
+            bg.setAttribute('fill', '#ffffff');
+            bg.setAttribute('stroke', '#dc2626');
+            bg.setAttribute('stroke-width', LINE_W * 0.7);
+            bg.setAttribute('rx', 3 / z);
+            bg.setAttribute('transform', `rotate(${textAngle} ${tx} ${ty})`);
+            g.appendChild(bg);
+
+            const tEl = document.createElementNS(ns, 'text');
+            tEl.setAttribute('x', tx);
+            tEl.setAttribute('y', ty + FS/3);
+            tEl.setAttribute('text-anchor', 'middle');
+            tEl.setAttribute('font-size', FS);
+            tEl.setAttribute('font-weight', 'bold');
+            tEl.setAttribute('fill', '#dc2626');
+            tEl.setAttribute('transform', `rotate(${textAngle} ${tx} ${ty})`);
+            tEl.textContent = label;
+            g.appendChild(tEl);
+
+            this.layerOv.appendChild(g);
+        });
+    },
+
+    clearMeasures() {
+        this.measures = [];
+        this.measuring = null;
+        this.renderMeasures();
     },
 
     renderObj(o, preview=false) {
