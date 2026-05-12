@@ -116,6 +116,9 @@ body { font-family: "Microsoft YaHei","PingFang SC","Segoe UI",sans-serif; heigh
     <div class="sep"></div>
     <label style="font-size:12px;"><input type="checkbox" id="snapChk" checked onchange="app.snapEnabled=this.checked"> 吸附网格</label>
     <button onclick="app.toggleDimensions()" id="btnDim" title="自动在外墙四周生成尺寸链">📏 尺寸标注</button>
+    <div class="sep"></div>
+    <button onclick="app.importBackground()" title="导入扫描户型图作为底图(描图)">🖼 底图</button>
+    <button onclick="app.calibrateBackground()" id="btnCalib" title="两点标定：按已知距离缩放底图到真实尺寸">📐 标定</button>
     <div class="grow"></div>
     <button onclick="app.newProject()">🆕 新建</button>
     <button onclick="app.openLoadDlg()">📂 加载</button>
